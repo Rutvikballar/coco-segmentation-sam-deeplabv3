@@ -1,0 +1,543 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% --------------------------------------------------------
+% Template for short technical reports
+% Version 1.0
+% --------------------------------------------------------
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\documentclass[9pt,a4paper,oneside]{rho-class/rho}
+\usepackage[english]{babel}
+\geometry{left=2cm,right=2cm,top=2cm,bottom=2cm,headsep=0.75cm}
+
+\setbool{rho-abstract}{true}
+\setbool{corres-info}{false}
+
+\def\OTHmodule{Computer Vision}
+
+%----------------------------------------------------------
+% TITLE
+%----------------------------------------------------------
+
+\journalname{Technical report - module ``\OTHmodule''}
+
+\title{Comparative Analysis of SAM, MobileSAM and FastSAM with Fine-Tuning of DeepLabV3}
+
+%----------------------------------------------------------
+% AUTHORS AND AFFILIATIONS
+%----------------------------------------------------------
+
+\author[1,\textdagger]{Rutvikkumar Babubhai Balar, r.balar@oth-aw.de}
+
+\affil[1]{OTH Amberg-Weiden, Study programme ``Master of Artificial Intelligence for Industrial Applications''}
+
+%----------------------------------------------------------
+% DATES
+%----------------------------------------------------------
+
+\dates{Supervisor: Prof. Dr. phil. Tatyana Ivanovska \textbar{} Matriculation number: 41470195 \textbar{} Report written on June 19, 2026}
+
+%----------------------------------------------------------
+% FOOTER INFORMATION
+%----------------------------------------------------------
+
+\footinfo{Project report ``\OTHmodule''}
+
+% Remove the running title from page headers; the full title remains in the title block.
+\fancyhead[RO,LE]{}
+
+%----------------------------------------------------------
+% ARTICLE INFORMATION
+%----------------------------------------------------------
+
+\corres{Project report submitted for the Computer Vision module.}
+\email{r.balar@oth-aw.de}
+\received{June 2026}
+\revised{June 2026}
+\accepted{June 2026}
+\published{June 2026}
+
+\license{Rho LaTeX Class \ccLogo\ This document is licensed under Creative Commons CC BY 4.0.}
+
+%----------------------------------------------------------
+% ABSTRACT
+%----------------------------------------------------------
+
+\begin{abstract}
+    This report compares SAM, MobileSAM and FastSAM as prompt-based models with DeepLabV3 as a supervised semantic segmentation baseline on selected COCO 2017 records. The prompt-based models receive the selected object's ground-truth bounding box, while DeepLabV3 predicts a full semantic class map without prompts. The models are evaluated using object-level Intersection over Union (IoU), inference time and model footprint, and DeepLabV3 is additionally fine-tuned on VOC-compatible COCO categories. SAM ViT-H gives the best mask quality, MobileSAM gives the strongest quality-speed tradeoff, and DeepLabV3 fine-tuning produces only a small but traceable improvement.
+\end{abstract}
+
+%----------------------------------------------------------
+
+\keywords{semantic segmentation, prompt-based segmentation, Segment Anything Model, MobileSAM, FastSAM, DeepLabV3, COCO, fine-tuning}
+
+%----------------------------------------------------------
+
+\begin{document}
+
+    \onecolumn
+
+    \maketitle
+    \thispagestyle{firststyle}
+
+%----------------------------------------------------------
+
+
+\section{Introduction}
+
+    \rhostart{I}mage segmentation is used to identify object regions at pixel level. Classical semantic segmentation models such as DeepLabV3 predict a fixed class label for every pixel \cite{chen2017deeplabv3}. Prompt-based models such as SAM follow a different idea: they generate a mask for a requested object or region using prompts such as points, boxes or masks \cite{kirillov2023sam}.
+
+    This project compares these two segmentation approaches in a controlled COCO 2017 setup. SAM, MobileSAM and FastSAM are evaluated as pretrained prompt-based models using the selected object's bounding box as input. DeepLabV3 is evaluated as a semantic segmentation baseline and is also fine-tuned on selected COCO training records that match its VOC-compatible output classes.
+
+    The comparison focuses on mask quality, inference speed and the effect of DeepLabV3 fine-tuning. Since the prompt-based models receive a target-object box while DeepLabV3 receives only the image, the experiment is not a perfectly equal benchmark between identical tasks. Instead, it shows how a prompted binary object mask and a semantic class map behave under the same selected-object evaluation protocol.
+
+\section{Background and Related Work}
+
+\subsection{Semantic Segmentation}
+
+    Semantic segmentation assigns a class label to every pixel in an image. For example, all person pixels are labelled as \textit{person}, all car pixels are labelled as \textit{car}, and all other pixels are assigned to background or another semantic class. A semantic segmentation model normally does not separate different instances of the same class. If an image contains two people, both may be labelled as \textit{person} without separating person 1 from person 2.
+
+    DeepLabV3 is a semantic segmentation architecture. It uses atrous, or dilated, convolution to increase the receptive field without reducing feature-map resolution too aggressively \cite{chen2017deeplabv3}. It also uses Atrous Spatial Pyramid Pooling (ASPP), where multiple dilation rates help the model capture context at different scales. In this project, the supervised baseline is torchvision DeepLabV3 with a ResNet-50 backbone. ResNet-50 is a convolutional feature extractor that uses residual connections to train deeper neural networks more reliably \cite{he2016resnet}.
+
+\subsection{Prompt-Based Segmentation}
+
+    Prompt-based segmentation models generate masks from additional input that tells the model what object or region should be segmented. SAM is a promptable segmentation model that can use prompts such as points, boxes and masks \cite{kirillov2023sam}. In this project, the prompt is always a bounding box around the selected target object. The model then predicts an object mask inside or near that box.
+
+    MobileSAM is a lightweight version of the SAM idea that aims to reduce computational cost while keeping strong prompt-based segmentation behaviour \cite{zhang2023mobilesam}. FastSAM is an efficient alternative designed for faster segmentation inference \cite{zhao2023fastsam}. In this project, SAM, MobileSAM and FastSAM are not fine-tuned. They are used as pretrained prompt-based models. Their task is to segment the selected object from a COCO bounding-box prompt, and their predicted mask is compared with the selected object's COCO segmentation mask.
+
+\section{Dataset and Preprocessing}
+
+\subsection{COCO 2017 Dataset}
+
+    The experiments use the COCO 2017 dataset \cite{lin2014coco}. COCO contains real-world images with object detection and segmentation annotations. The validation images and segmentation annotations are used for evaluation, and the training annotations are used to build DeepLabV3 fine-tuning masks. The project uses selected COCO records rather than every object in every image, because the aim is to compare models on a controlled target-object protocol.
+
+    The official COCO test2017 split was not used because its segmentation annotations are not publicly available for local IoU calculation; therefore, COCO val2017 was used as the held-out evaluation split in this project.
+
+    Table~\ref{tab:dataset-summary} summarizes the dataset parts used in the project, including the number of images or selected records, the image-size handling and the class information.
+
+\begin{table}[H]
+    \centering
+    \caption{Dataset information used in this project.}
+    \label{tab:dataset-summary}
+    \footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{>{\raggedright\arraybackslash}p{0.22\textwidth}>{\raggedright\arraybackslash}p{0.17\textwidth}>{\raggedright\arraybackslash}p{0.26\textwidth}>{\raggedright\arraybackslash}p{0.25\textwidth}}
+        \hline
+        \textbf{Dataset part} & \textbf{Images / records} & \textbf{Image-size information} & \textbf{Class description} \\
+        \hline
+        COCO 2017 training split & 118,287 images & Original COCO image sizes are used when building training masks. & 80 COCO object categories; DeepLabV3 uses 20 VOC-compatible foreground classes plus background. \\
+        COCO 2017 validation split & 5,000 images & Original image width and height are kept from the COCO metadata. & 80 COCO object categories with segmentation annotations. \\
+        Main selected validation list & 1,000 selected records & One selected object is stored per image with its image size, bounding box and mask. & Used for the main all-model comparison; DeepLabV3 has valid IoU on 669 VOC-compatible records. \\
+        Larger selected validation list & 4,844 selected records & One primary object is stored per image for the larger validation check. & Used to test whether the ranking remains stable; DeepLabV3 has valid IoU on 3,116 VOC-compatible records. \\
+        \hline
+    \end{tabular}%
+\end{table}
+
+    Two selected validation files are used. The main selected validation file is \texttt{val\_1000\_primary\_objects.json}, which contains 1,000 selected validation records. This is the main all-model comparison. The larger selected validation file is \texttt{val\_all\_primary\_objects.json}, which contains 4,844 selected validation records. The larger set is used to check whether the main conclusions remain stable on more records.
+
+    For each selected validation record, these files store the image id, file name, image size, selected annotation id, selected object category, selected object bounding box and object area. One primary object is selected per image. This gives one target object, one bounding-box prompt and one ground-truth object mask for each evaluation record.
+
+    The selected-object setup is illustrated in Figure~\ref{fig:dataset-sample}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.82\textwidth]{cv_dataset_sample.png}
+    \caption{Example COCO selected-object mask.}
+    \label{fig:dataset-sample}
+\end{figure}
+
+    Figure~\ref{fig:dataset-sample} illustrates the central design of the evaluation protocol. The task is not only to segment any semantic region in the image, but to recover the selected object instance defined by the annotation and bounding box. This matters because prompt-based models are naturally guided toward this instance-level target, while DeepLabV3 must infer a full semantic map without knowing which object instance is being requested.
+
+\subsection{DeepLabV3 Class Mapping}
+
+    The pretrained torchvision DeepLabV3 model used in this project has a PASCAL VOC-style output space with 20 foreground classes plus background. COCO has 80 object categories. Therefore, DeepLabV3 cannot directly predict every selected COCO category. For DeepLabV3 evaluation and fine-tuning, only COCO categories that overlap with the VOC-style DeepLabV3 output classes are mapped.
+
+    The mapped COCO categories are: \textit{airplane}, \textit{bicycle}, \textit{bird}, \textit{boat}, \textit{bottle}, \textit{bus}, \textit{car}, \textit{cat}, \textit{chair}, \textit{cow}, \textit{dining table}, \textit{dog}, \textit{horse}, \textit{motorcycle}, \textit{person}, \textit{potted plant}, \textit{sheep}, \textit{couch}, \textit{train} and \textit{tv}. These categories are mapped to the matching VOC-style output labels, such as \textit{airplane} to \textit{aeroplane}, \textit{motorcycle} to \textit{motorbike}, \textit{couch} to \textit{sofa}, and \textit{tv} to \textit{tvmonitor}.
+
+    In the main 1000-record validation subset, DeepLabV3 has valid IoU values for 669 VOC-compatible selected objects. The other 331 records are unsupported COCO categories for this DeepLabV3 output head. These unsupported records are not hidden or removed from the raw result files. They remain in the raw DeepLabV3 CSVs with \texttt{supported\_deeplab\_class=False} and \texttt{iou=NaN}. They are excluded only from the DeepLabV3 mean IoU because the model cannot produce a meaningful class-specific prediction for those categories.
+
+    Therefore, the DeepLabV3 scores should be read as performance on supported semantic categories, not as a full COCO-80 comparison.
+
+\section{Methodology}
+
+    This section describes the experimental pipeline in the same order in which the project was implemented. The goal was to make the comparison reproducible: each model is evaluated on the same selected validation records, the same target object masks, and the same summary metrics. The main difference is the model input type, because the SAM-family models receive a box prompt while DeepLabV3 receives only the image.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.78\textwidth]{cv_evaluation_pipeline.png}
+    \caption{Experimental evaluation pipeline used for comparing prompt-based models and DeepLabV3.}
+    \label{fig:evaluation-pipeline}
+\end{figure}
+
+\subsection{Object-Level Masks and Semantic Class Maps}
+
+    SAM-family models receive the selected object’s bounding box and return a mask for that prompted object. DeepLabV3 receives only the image and predicts a semantic class map. For comparison, the predicted pixels of the selected target class are extracted and compared with the selected COCO object mask. If multiple objects of the same class are present, DeepLabV3 may include more than the requested instance, so the comparison is practical but not perfectly equivalent.
+
+\subsection{Model Setup}
+
+    The comparison includes both prompt-based object mask models and a supervised semantic segmentation baseline:
+
+    \begin{itemize}
+        \item \textbf{SAM ViT-B and SAM ViT-H:} prompt-based Segment Anything checkpoints used with the selected COCO bounding box as input.
+        \item \textbf{MobileSAM:} a lightweight SAM-style model used to test whether similar mask quality can be achieved with lower runtime.
+        \item \textbf{FastSAM:} a faster prompt-based segmentation model used to represent the speed-oriented side of the comparison.
+        \item \textbf{DeepLabV3 pretrained:} a torchvision DeepLabV3-ResNet50 semantic segmentation model used without a prompt.
+        \item \textbf{DeepLabV3 fine-tuned:} the same DeepLabV3 baseline after project-specific supervised fine-tuning and weight-interpolated checkpoint selection.
+    \end{itemize}
+
+    This setup makes the report more than a simple model ranking. It compares two practical ways of doing segmentation: user- or detector-guided object segmentation through prompts, and automatic semantic segmentation through a fixed class map.
+
+\subsection{Evaluation Protocol}
+
+\subsubsection{IoU Metric}
+
+    The main evaluation metric is object-level Intersection over Union (IoU). IoU was selected because it is the standard overlap metric for object segmentation and directly measures agreement between predicted and reference masks. For a predicted object mask and a ground-truth object mask, IoU is computed as:
+
+    \begin{equation}
+        \mathrm{IoU} = \frac{|M_{pred} \cap M_{gt}|}{|M_{pred} \cup M_{gt}|},
+        \label{eq:iou}
+    \end{equation}
+
+    where \(M_{pred}\) is the predicted mask and \(M_{gt}\) is the selected COCO ground-truth object mask. IoU penalizes both false-positive pixels and missed object pixels. A higher IoU means that the predicted mask overlaps the ground-truth mask more closely.
+
+\subsubsection{Prompt-Based Evaluation}
+
+    For SAM, MobileSAM and FastSAM, each selected validation image is paired with the selected object's COCO bounding box. The model predicts one object mask from this prompt, and that mask is compared with the COCO object mask using IoU. Inference time is recorded per image.
+
+\subsubsection{DeepLabV3 Evaluation}
+
+    For DeepLabV3, the image is processed without a prompt. The logits are resized to the original image size and converted into a semantic class map with \texttt{argmax}. For VOC-compatible selected categories, the target-class pixels are extracted and compared with the selected COCO object mask. IoU and inference time are recorded for valid records.
+
+    This protocol uses the same selected image and the same selected object mask for every model. However, it is not an identical task for every model because the prompt-based models receive the object box and DeepLabV3 does not. The results should therefore be read as a practical comparison of two segmentation approaches, not as a like-for-like leaderboard.
+
+\subsection{Runtime and Computational Efficiency}
+
+\subsubsection{Timing Setup}
+
+    Runtime was measured per image during the evaluation loops. The result tables report mean seconds per image. Runtime values were measured under the hardware configuration used during the experiments and should be interpreted as measurements for this hardware and implementation, not as universal speed values. Runtime can depend on the model implementation, image size, preprocessing, hardware configuration, memory state and library overhead.
+
+    Computational efficiency was evaluated mainly through inference time and model/checkpoint footprint; peak GPU memory and RAM usage were not directly profiled. Stored checkpoint sizes used for computational footprint comparison are:
+
+\begin{center}
+    \footnotesize
+    \setlength{\tabcolsep}{8pt}
+    \renewcommand{\arraystretch}{0.95}
+    \begin{tabular}{lr}
+        \toprule
+        \textbf{Model} & \textbf{Checkpoint size} \\
+        \midrule
+        FastSAM-S & 22.7 MiB \\
+        MobileSAM & 38.8 MiB \\
+        DeepLabV3 fine-tuned & 160.6 MiB \\
+        SAM ViT-B & 357.7 MiB \\
+        SAM ViT-H & 2445.7 MiB \\
+        \bottomrule
+    \end{tabular}
+\end{center}
+
+\subsubsection{Hardware Context}
+
+    The main experimental hardware included an NVIDIA GeForce RTX 2080 SUPER GPU. The runtime results are therefore useful for comparing the implementations used in this project, but they should not be treated as universal speed values for all systems.
+
+
+\section{DeepLabV3 Fine-Tuning}
+
+\subsection{Fine-Tuning Pipeline}
+
+\subsubsection{Transfer-Learning Design}
+
+    DeepLabV3 fine-tuning was the practical supervised training component of the project. The prompt-based SAM-family models were used as pretrained models, while DeepLabV3 was fine-tuned on selected COCO training records using supervised semantic segmentation. COCO training annotations were converted into VOC-compatible semantic masks, and pixels belonging to unsupported COCO categories were ignored during training.
+
+    The model started from pretrained torchvision DeepLabV3-ResNet50 weights rather than from random initialization. This choice keeps useful visual and segmentation features from the pretrained model and avoids the data and compute cost of training from scratch. The fine-tuning path then developed in stages: head-only transfer learning, limited adaptation of the final ResNet block, larger training subsets, and a final large run with frozen BatchNorm and gradient accumulation.
+
+    Table~\ref{tab:fine-tuning-configs} summarizes the fine-tuning configurations.
+
+\begin{table}[H]
+    \centering
+    \caption{DeepLabV3 fine-tuning configurations.}
+    \label{tab:fine-tuning-configs}
+    \resizebox{\textwidth}{!}{%
+    \begin{tabular}{crclcclll}
+        \toprule
+        \textbf{Trial} & \textbf{Records} & \textbf{Epochs / stages} & \textbf{Trainable part} & \textbf{Batch} & \textbf{Image size} & \textbf{Loss} & \textbf{Head LR} & \textbf{Backbone LR} \\
+        \midrule
+        A & 2,000 & 1 epoch & classifier head only & 4 & 320 & CE & 0.001 & frozen \\
+        B & 2,000 & 3 epochs & layer4 + head & 2 & 384 & weighted CE + Dice & 0.0002 & 0.00005 \\
+        C & 5,000 & 3 epochs & staged head then layer4 & 2 & 384 & weighted CE + Dice & 0.0002 & 0.00005 \\
+        D & 10,000 & staged & staged head then layer4 & 2 & 384 & weighted CE + Dice & 0.0001 & 0.00002 \\
+        E & 50,000 & staged & staged head then layer4, frozen BN & 1, accum. 2 & 384 & weighted CE + Dice & 0.0001 & 0.00002 \\
+        \bottomrule
+    \end{tabular}%
+    }
+\end{table}
+
+    Each trial had a specific purpose in the fine-tuning process:
+
+    \begin{itemize}
+        \item \textbf{Trial A} tested a simple head-only baseline with very low training cost.
+        \item \textbf{Trial B} checked whether unfreezing the final backbone block and using Dice loss improved mask overlap.
+        \item \textbf{Trial C} tested whether the staged head-then-backbone method remained stable with more records.
+        \item \textbf{Trial D} refined the staged setup with a larger subset and smaller learning rates.
+        \item \textbf{Trial E} scaled the selected staged setup to 50,000 records with frozen BatchNorm and gradient accumulation for the final checkpoint.
+    \end{itemize}
+
+\subsubsection{Final Fine-Tuning Procedure}
+
+    Table~\ref{tab:fine-tuning-configs} shows the sequence of fine-tuning attempts from a simple transfer-learning baseline to the final larger training run. The final fine-tuning run followed this practical procedure:
+
+    \begin{enumerate}
+        \item convert selected COCO training annotations into VOC-compatible semantic masks,
+        \item train the classifier head first so that the output layers adapt without disturbing the full backbone,
+        \item unfreeze the final ResNet block for limited feature adaptation,
+        \item use weighted cross entropy and foreground Dice loss to handle foreground-background imbalance,
+        \item combine the fine-tuned checkpoint with pretrained weights through weight interpolation,
+        \item evaluate the final checkpoint with the same validation protocol used for the pretrained baseline.
+    \end{enumerate}
+
+    Thus, the final checkpoint is the result of a controlled transfer-learning pipeline rather than an unchanged pretrained model.
+
+\subsection{Training Configuration}
+
+    The final 50,000-record trial used 384-pixel resized training inputs, actual batch size 1, gradient accumulation 2, head learning rate \(1 \times 10^{-4}\) and backbone learning rate \(2 \times 10^{-5}\).
+
+    In the final staged training setup, the first stage trained the DeepLabV3 classifier head and auxiliary classifier. With frozen BatchNorm, this stage had 18,491,946 trainable parameters out of 42,004,074 total parameters, which is about 44.0\% of the model.
+
+    The second stage trained \texttt{backbone.layer4}, the classifier head and the auxiliary classifier. In this stage, 33,434,154 parameters were trainable, which is about 79.6\% of the model, while 8,569,920 parameters remained frozen.
+
+    The earlier backbone parts, namely \texttt{backbone.conv1}, \texttt{backbone.bn1}, \texttt{backbone.layer1}, \texttt{backbone.layer2} and \texttt{backbone.layer3}, stayed frozen. This strategy allowed the later semantic features and segmentation head to adapt while keeping earlier pretrained features stable. Frozen BatchNorm was used because very small batch sizes can make BatchNorm statistics noisy. Gradient accumulation was used to support a larger effective batch size under the available hardware configuration.
+
+\subsection{Loss Function}
+
+    The first training attempt used cross entropy loss. Later and stronger attempts used a combined loss:
+
+    \begin{equation}
+        \mathcal{L} = \mathcal{L}_{\mathrm{weighted\ CE}} + 0.5 \cdot \mathcal{L}_{\mathrm{foreground\ Dice}}.
+        \label{eq:loss}
+    \end{equation}
+
+    Weighted cross entropy was used because segmentation masks are usually highly imbalanced. Background pixels are much more common than foreground object pixels, so the background class weight was reduced to 0.15. Foreground Dice loss was added because it directly encourages overlap between predicted foreground regions and target foreground regions. Pixels marked with \texttt{ignore\_index=255} did not contribute to the loss.
+
+\subsection{Checkpoint Interpolation}
+
+    Direct fine-tuning can move a model away from useful pretrained weights. To keep the final model conservative, the selected checkpoint used weight interpolation between the pretrained checkpoint and the fine-tuned checkpoint:
+
+    \begin{equation}
+        W_{final} = \alpha W_{finetuned} + (1 - \alpha) W_{pretrained}.
+        \label{eq:model-soup}
+    \end{equation}
+
+    The selected final value was \(\alpha = 0.5\). This means the reported fine-tuned checkpoint is halfway between the pretrained DeepLabV3 weights and the fine-tuned weights. All final DeepLabV3 fine-tuned results in this report use this 50,000-record interpolated checkpoint.
+
+    The evidence for fine-tuning is based on preserved checkpoints, paired before/after validation results and the larger validation robustness check.
+
+\section{Results and Discussion}
+
+    The results are reported in a way that connects each number to its practical meaning. Mean IoU describes average mask overlap, median IoU shows the typical case, and runtime gives an indication of practical efficiency. In the tables, \textit{Records} is the number of selected validation records, while \textit{IoU records} is the number of records with a valid IoU value. This is important for DeepLabV3 because unsupported COCO categories are kept in the record count but excluded from its mean IoU.
+
+\subsection{Main Segmentation Results}
+
+\subsubsection{Main Result Table}
+
+    The main comparison was performed on 1000 selected COCO validation records. SAM ViT-B, SAM ViT-H, MobileSAM and FastSAM have IoU values for all 1000 selected objects. DeepLabV3 has IoU values for 669 records because only those selected objects are VOC-compatible for the DeepLabV3 output head.
+
+    Table~\ref{tab:main-results} gives the common result summary for the main validation subset.
+
+\begin{table}[H]
+    \centering
+    \caption{Main validation results.}
+    \label{tab:main-results}
+    \resizebox{\textwidth}{!}{%
+    \begin{tabular}{lrrrrr}
+        \toprule
+        \textbf{Model} & \textbf{Records} & \textbf{IoU records} & \textbf{Mean IoU} & \textbf{Median IoU} & \textbf{Mean time/image} \\
+        \midrule
+        SAM ViT-B & 1000 & 1000 & 0.7762 & 0.8506 & 5.1328 s \\
+        SAM ViT-H & 1000 & 1000 & 0.8215 & 0.8855 & 13.0735 s \\
+        MobileSAM & 1000 & 1000 & 0.8161 & 0.8708 & 0.5433 s \\
+        FastSAM & 1000 & 1000 & 0.6029 & 0.7320 & 0.2297 s \\
+        DeepLabV3 pretrained & 1000 & 669 & 0.6253 & 0.7001 & 0.8931 s \\
+        DeepLabV3 fine-tuned & 1000 & 669 & 0.6288 & 0.7024 & 0.8930 s \\
+        \bottomrule
+    \end{tabular}%
+    }
+\end{table}
+
+\subsubsection{Quality Interpretation}
+
+    In Table~\ref{tab:main-results}, the prompt-based models have valid IoU values for all 1000 selected objects. DeepLabV3 has valid IoU values only for the 669 VOC-compatible records. The segmentation-quality analysis focuses on the mean and median IoU columns, while the runtime column is discussed separately in Section~\ref{sec:runtime-analysis}.
+
+    The strongest segmentation result is SAM ViT-H, with a mean IoU of 0.8215 and median IoU of 0.8855. This is expected because the larger ViT-H image encoder has higher representation capacity and can preserve fine object boundaries more effectively.
+
+    MobileSAM is the most important practical quality result because its mean IoU is very close at 0.8161. This indicates that a lighter SAM-style encoder can retain most of the useful prompt-following behaviour when the model receives a strong bounding-box prompt.
+
+    FastSAM and DeepLabV3 show different limitations in the segmentation-quality column. FastSAM has lower object overlap, while DeepLabV3 is limited by the fact that it predicts semantic class regions rather than a prompt-conditioned instance mask. Therefore, DeepLabV3 can correctly identify person or car regions in general while still failing to isolate exactly the selected COCO instance.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\columnwidth]{cv_mean_iou_comparison.png}
+    \caption{Mean IoU comparison.}
+    \label{fig:mean-iou}
+\end{figure}
+
+    Figure~\ref{fig:mean-iou} shows that SAM ViT-H gives the highest IoU, while MobileSAM remains very close with much lower runtime. FastSAM and DeepLabV3 have lower object-level IoU in this setup.
+
+\subsection{Runtime and Computational Efficiency}
+\label{sec:runtime-analysis}
+
+\subsubsection{Speed Comparison}
+
+    The runtime component of the main comparison is visualized in Figure~\ref{fig:runtime}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\columnwidth]{cv_runtime_comparison.png}
+    \caption{Inference-time comparison.}
+    \label{fig:runtime}
+\end{figure}
+
+    Figure~\ref{fig:runtime} summarizes the computational-efficiency pattern. FastSAM has the lowest runtime, but MobileSAM is the stronger compromise because it preserves much higher IoU while still being far faster than the full SAM checkpoints. SAM ViT-H was evaluated under heavier local resource constraints, so its runtime should be interpreted mainly as evidence of its larger computational cost, not as a universal benchmark.
+
+\subsubsection{Deployment Interpretation}
+
+    In practice, the model choice depends on the application. FastSAM is useful when speed is most important, while MobileSAM is better when both quality and runtime matter.
+
+\subsection{DeepLabV3 Fine-Tuning Effect}
+
+\subsubsection{Mean IoU Change}
+
+    The final selected DeepLabV3 fine-tuned model was compared with the pretrained DeepLabV3 model on the same 1000 selected validation records. The before/after values are computed on the same 669 VOC-compatible records.
+
+    Table~\ref{tab:deeplab-before-after} reports the resulting mean IoU change.
+
+\begin{table}[H]
+    \centering
+    \caption{DeepLabV3 fine-tuning comparison.}
+    \label{tab:deeplab-before-after}
+    \begin{tabular}{lrr}
+        \toprule
+        \textbf{Model} & \textbf{Mean IoU} & \textbf{Delta} \\
+        \midrule
+        Pretrained & 0.6253 & 0.0000 \\
+        Fine-tuned interpolated 50k & 0.6288 & +0.0034 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+    Fine-tuning improved the mean IoU from 0.6253 to 0.6288, which is a gain of +0.0034. This is a small improvement, so it should be interpreted cautiously.
+
+    The main reason is that the pretrained DeepLabV3 model already contains useful semantic features for VOC-style categories, so the remaining improvement available from limited COCO fine-tuning is small. The important point is that the fine-tuning pipeline was implemented, saved, evaluated against the pretrained baseline and checked again on a larger validation subset.
+
+\subsubsection{Class-Level Diagnostics}
+
+    The class-wise before/after diagnostics make the result more understandable. Some categories improved, such as \textit{dining table}, \textit{car}, \textit{dog} and \textit{boat}. Other categories decreased slightly, which suggests that the fine-tuning did not uniformly improve the learned class representations. Therefore, the fine-tuning result is reported as a small mean-IoU gain, not as a consistent improvement across every category.
+
+    Figure~\ref{fig:deeplab-classwise} reports these class-wise changes.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\columnwidth]{cv_deeplab_classwise_before_after.png}
+    \caption{Class-wise DeepLabV3 fine-tuning effect.}
+    \label{fig:deeplab-classwise}
+\end{figure}
+
+    The class-level view adds information that is missing from a single mean IoU number. Figure~\ref{fig:deeplab-classwise} shows mean IoU changes for mapped classes with enough supported validation records. The result shows that fine-tuning changed the model behaviour unevenly across categories. DeepLabV3 fine-tuning improved the selected mean IoU, but the improvement is best understood as modest and class-dependent.
+
+\subsection{Larger Validation Check}
+
+\subsubsection{Larger Validation Setup}
+
+    A larger validation check was also performed on 4844 selected validation records for MobileSAM, FastSAM, pretrained DeepLabV3 and fine-tuned DeepLabV3. This check tests whether the main conclusions remain similar on more selected validation records.
+
+    SAM ViT-B and SAM ViT-H were not included in the larger validation check because their runtime was much higher, and the robustness step focused on the efficient prompt models and the DeepLabV3 before/after comparison.
+
+    Table~\ref{tab:full-validation} reports the larger-set results.
+
+\begin{table}[H]
+    \centering
+    \caption{Full-validation robustness check.}
+    \label{tab:full-validation}
+    \resizebox{\textwidth}{!}{%
+    \begin{tabular}{lrrrrr}
+        \toprule
+        \textbf{Model} & \textbf{Records} & \textbf{IoU records} & \textbf{Mean IoU} & \textbf{Median IoU} & \textbf{Mean time/image} \\
+        \midrule
+        MobileSAM & 4844 & 4844 & 0.8234 & 0.8780 & 0.6396 s \\
+        FastSAM & 4844 & 4844 & 0.6039 & 0.7202 & 0.2519 s \\
+        DeepLabV3 pretrained & 4844 & 3116 & 0.6261 & 0.7032 & 0.9800 s \\
+        DeepLabV3 fine-tuned & 4844 & 3116 & 0.6283 & 0.7019 & 0.8553 s \\
+        \bottomrule
+    \end{tabular}%
+    }
+\end{table}
+
+    Table~\ref{tab:full-validation} uses 4844 selected validation records for the larger robustness check. MobileSAM and FastSAM have IoU values for all selected objects, while DeepLabV3 has IoU values for 3116 VOC-compatible records.
+
+\subsubsection{Robustness Interpretation}
+
+    The larger validation check supports the main interpretation. MobileSAM remains strong and efficient, with mean IoU 0.8234, which shows that its quality-speed balance is not only a small-sample effect. FastSAM remains fastest but less accurate, with mean IoU 0.6039, confirming the same speed-quality tradeoff seen in the main subset.
+
+    DeepLabV3 fine-tuning again gives a small positive mean-IoU change, from 0.6261 to 0.6283. However, the median IoU decreases slightly from 0.7032 to 0.7019. This means the fine-tuning effect is mixed: it improves the mean slightly but does not improve every typical case.
+
+    This robustness check strengthens the research interpretation for the models included in the larger validation setup. It supports the conclusion that MobileSAM is the best practical compromise among the larger-check models, while FastSAM mainly optimizes speed and DeepLabV3 remains a different kind of semantic segmentation baseline.
+
+\subsection{Qualitative Comparison}
+
+\subsubsection{Representative Example}
+
+    The final visual comparison uses a representative validation example where the model IoUs are close to the final average behaviour. The selected example is image id 149770 with category \textit{person}. The example IoUs are 0.8325 for SAM ViT-B, 0.8486 for SAM ViT-H, 0.8476 for MobileSAM, 0.5905 for FastSAM, 0.6290 for pretrained DeepLabV3 and 0.6463 for fine-tuned DeepLabV3.
+
+    Figure~\ref{fig:visual-comparison} provides the corresponding qualitative comparison. The COCO ground-truth masks are human annotations and can contain boundary imperfections, but the same mask is used consistently for all models, so the comparison remains fair.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{cv_visual_segmentation_comparison.png}
+    \caption{Qualitative segmentation example.}
+    \label{fig:visual-comparison}
+\end{figure}
+
+\subsubsection{Visual Interpretation}
+
+    The qualitative comparison gives the visual reason behind the numerical results. The SAM-family models are guided directly to the target object by the bounding box, so their masks focus on the requested instance. DeepLabV3 predicts class pixels over the full image and does not know which specific object instance is requested.
+
+    Taken together, the visual example shows that the comparison is not only about which model has the highest IoU. It also shows that prompt-based segmentation and semantic segmentation solve related but different practical problems. Prompt-based models are better suited to user-selected or detector-selected objects, while DeepLabV3 is more appropriate when an automatic class-level map is required.
+
+\section{Limitations}
+
+    The project has several important limitations:
+
+    \begin{itemize}
+        \item The prompt-based models receive ground-truth bounding-box prompts, while DeepLabV3 does not receive prompts.
+        \item Ground-truth boxes are clean prompts. In real applications, boxes may come from a user or object detector and may be less accurate.
+        \item DeepLabV3 is evaluated only on COCO categories that overlap with its VOC-compatible output classes.
+        \item The IoU is object-level, which favours models that can target a selected instance.
+        \item DeepLabV3 predicts semantic class masks and cannot know which specific object instance is selected.
+        \item Runtime values were measured under the hardware configuration used during the experiments and should be interpreted as measurements for this hardware and implementation, not as universal speed values.
+        \item DeepLabV3 fine-tuning used a conservative training schedule rather than exhaustive hyperparameter search.
+        \item The final 50k fine-tuning run was evaluated using before/after validation IoU, but a complete preserved training-loss curve was not available, so convergence is discussed through validation behaviour rather than a plotted learning curve.
+        \item The final DeepLabV3 improvement is small and should not be described as significant.
+    \end{itemize}
+
+    These limitations define the scope of the conclusions. The comparison is useful because it highlights the practical difference between prompt-based segmentation and fully supervised semantic segmentation. It should not be presented as a perfectly equal benchmark.
+
+\section{Conclusion}
+
+    This project compared SAM ViT-B, SAM ViT-H, MobileSAM, FastSAM and DeepLabV3 on selected COCO segmentation records. The experiments evaluated object-level mask quality, inference time, model footprint and the practical difference between prompt-based object segmentation and supervised semantic segmentation.
+
+    SAM ViT-H achieved the highest mean IoU on the main validation subset, while MobileSAM achieved almost the same segmentation quality with much lower runtime. FastSAM was the fastest model but had lower IoU. DeepLabV3 performed reasonably on VOC-compatible semantic classes, but it was less suited to the selected object-level evaluation because it predicts class maps without a prompt.
+
+    The DeepLabV3 fine-tuning part was completed using selected COCO training records converted into VOC-compatible semantic masks. The final 50,000-record model-soup checkpoint improved mean IoU from 0.6253 to 0.6288 on the main validation subset. The improvement is small, and the larger validation check also showed that the effect is mixed. Therefore, the fine-tuning should be interpreted as a genuine but limited adaptation result.
+
+    The project shows that prompt-based models are very strong when a target-object prompt is available, especially MobileSAM as a quality-speed compromise. DeepLabV3 remains useful as a supervised semantic segmentation baseline, but it solves a different task from prompted instance-style object segmentation. This difference is the main reason why the results should be interpreted as a practical comparison of segmentation approaches rather than a single universal leaderboard.
+
+%----------------------------------------------------------
+
+\section{Declaration}
+
+    Gemini \cite{google2025gemini} was used as a support tool for coding and debugging in this project work.
+
+%----------------------------------------------------------
+
+\printbibliography
+
+%----------------------------------------------------------
+
+\end{document}
